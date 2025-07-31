@@ -78,12 +78,6 @@ pip install crewai crewai[tools] langchain-huggingface langchain-community trans
 
 ---
 
-## License
-
-MIT License
-    - For API-free search, replace `TavilySearchResults` with `SearxngSearch` (use a public instance from [searx.space](https://searx.space/)).
-
----
 
 ## License
 
