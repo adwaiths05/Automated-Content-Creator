@@ -3,6 +3,7 @@ from crewai import Agent, Task, Crew
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_huggingface import HuggingFacePipeline
 from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
+from dotenv import load_dotenv
 import os
 import chromadb
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
@@ -131,3 +132,5 @@ with gr.Blocks() as demo:
         outputs=[output, reference_output]
     )
 
+# Launch interface
+demo.launch()
