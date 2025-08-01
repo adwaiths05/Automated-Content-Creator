@@ -3,7 +3,6 @@ from crewai import Agent, Task, Crew
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_huggingface import HuggingFacePipeline
 from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
-from dotenv import load_dotenv
 import os
 import chromadb
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
@@ -68,6 +67,17 @@ def suggest_prompts(partial_input):
     suggestions = [suggestion_tokenizer.decode(output, skip_special_tokens=True) for output in outputs]
     return "\n".join(suggestions)
 
+# Function to get top reference websites
+def get_reference_websites():
+    websites = [
+        {"name": "Scite", "url": "https://scite.ai", "description": "AI-powered tool for analyzing citations and research reliability"},
+        {"name": "Elicit", "url": "https://elicit.com", "description": "AI research assistant for summarizing and extracting data from papers"},
+        {"name": "Semantic Scholar", "url": "https://www.semanticscholar.org", "description": "AI-driven search engine for academic literature"},
+        {"name": "ResearchRabbit", "url": "https://www.researchrabbit.ai", "description": "Visualizes citation networks for literature reviews"},
+        {"name": "KDnuggets", "url": "https://www.kdnuggets.com", "description": "Blog for AI, machine learning, and data science trends"}
+    ]
+    return "\n".join([f"- [{site['name']}]({site['url']}): {site['description']}" for site in websites])
+
 # Function to process user query
 def process_query(query):
     research_task = Task(
@@ -93,14 +103,19 @@ def process_query(query):
         process="sequential"
     )
     result = crew.kickoff()
-    return result
+    references = get_reference_websites()
+    return str(result), references
 
 # Gradio interface
 with gr.Blocks() as demo:
-    gr.Markdown("# AI Trends Q&A")
+    gr.Markdown("# AI Trends Q&A with Top Reference Websites")
     with gr.Row():
-        query_input = gr.Textbox(label="Ask about AI trends", placeholder="Type your question...")
-        suggestion_output = gr.Textbox(label="Prompt Suggestions", interactive=False)
+        with gr.Column(scale=3):
+            query_input = gr.Textbox(label="Ask about AI trends", placeholder="Type your question...")
+            suggestion_output = gr.Textbox(label="Prompt Suggestions", interactive=False)
+            submit_button = gr.Button("Submit")
+        with gr.Column(scale=1):
+            reference_output = gr.Markdown(label="Top Reference Websites")
     
     query_input.change(
         fn=suggest_prompts,
@@ -108,14 +123,11 @@ with gr.Blocks() as demo:
         outputs=suggestion_output
     )
     
-    submit_button = gr.Button("Submit")
     output = gr.Textbox(label="Response")
     
     submit_button.click(
         fn=process_query,
         inputs=query_input,
-        outputs=output
+        outputs=[output, reference_output]
     )
 
-# Launch interface
-demo.launch()
