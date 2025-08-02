@@ -1,26 +1,29 @@
 import gradio as gr
 from crewai import Agent, Task, Crew
 from langchain_community.tools.tavily_search import TavilySearchResults
-from langchain_huggingface import HuggingFacePipeline
+from langchain_huggingface import HuggingFacePipeline, HuggingFaceEmbeddings
 from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
 from dotenv import load_dotenv
 import os
-import chromadb
-from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+import faiss
+import numpy as np
 
 # Load environment variables
 load_dotenv()
 os.environ["TAVILY_API_KEY"] = "your-tavily-api-key"
 
-# Initialize chromadb client with sentence-transformers
-chroma_client = chromadb.Client()
-embedding_function = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+# Initialize FAISS index
+dimension = 384  # Matches sentence-transformers/all-MiniLM-L6-v2
+index = faiss.IndexFlatL2(dimension)
 
-# Initialize main LLM (EleutherAI/gpt-neo-2.7B)
+# Initialize embeddings for FAISS
+embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+
+# Initialize main LLM (Llama-3.1-8B)
 main_pipeline = pipeline(
     "text-generation",
-    model="EleutherAI/gpt-neo-2.7B",
-    max_new_tokens=1000,
+    model="meta-llama/Llama-3.1-8B",
+    max_new_tokens=1500,
     temperature=0.7
 )
 main_llm = HuggingFacePipeline(pipeline=main_pipeline)
@@ -32,15 +35,14 @@ suggestion_model = AutoModelForCausalLM.from_pretrained("gpt2")
 # Initialize TavilySearch tool
 search_tool = TavilySearchResults()
 
-# Define agents
+# Define agents with FAISS for knowledge storage
 researcher = Agent(
     role="Researcher",
     goal="Find recent information based on user query about AI trends",
     backstory="Expert in web research and data synthesis",
     llm=main_llm,
     tools=[search_tool],
-    allow_knowledge=False,
-    allow_delegation=False
+    knowledge=index  # Use FAISS index
 )
 
 outliner = Agent(
@@ -48,8 +50,7 @@ outliner = Agent(
     goal="Create a concise outline based on research",
     backstory="Skilled in structuring content for clarity",
     llm=main_llm,
-    allow_knowledge=False,
-    allow_delegation=False
+    knowledge=index
 )
 
 writer = Agent(
@@ -57,8 +58,7 @@ writer = Agent(
     goal="Generate a detailed response based on the outline",
     backstory="Experienced in crafting engaging tech content",
     llm=main_llm,
-    allow_knowledge=False,
-    allow_delegation=False
+    knowledge=index
 )
 
 # Function to generate prompt suggestions
@@ -68,19 +68,12 @@ def suggest_prompts(partial_input):
     suggestions = [suggestion_tokenizer.decode(output, skip_special_tokens=True) for output in outputs]
     return "\n".join(suggestions)
 
-# Function to get top reference websites
-def get_reference_websites():
-    websites = [
-        {"name": "Scite", "url": "https://scite.ai", "description": "AI-powered tool for analyzing citations and research reliability"},
-        {"name": "Elicit", "url": "https://elicit.com", "description": "AI research assistant for summarizing and extracting data from papers"},
-        {"name": "Semantic Scholar", "url": "https://www.semanticscholar.org", "description": "AI-driven search engine for academic literature"},
-        {"name": "ResearchRabbit", "url": "https://www.researchrabbit.ai", "description": "Visualizes citation networks for literature reviews"},
-        {"name": "KDnuggets", "url": "https://www.kdnuggets.com", "description": "Blog for AI, machine learning, and data science trends"}
-    ]
-    return "\n".join([f"- [{site['name']}]({site['url']}): {site['description']}" for site in websites])
-
 # Function to process user query
 def process_query(query):
+    # Embed query for FAISS
+    query_embedding = embeddings.embed_query(query)
+    index.add(np.array([query_embedding], dtype=np.float32))
+
     research_task = Task(
         description=f"Search for and summarize information on: {query}",
         expected_output="Bullet-point summary of key points",
@@ -104,19 +97,14 @@ def process_query(query):
         process="sequential"
     )
     result = crew.kickoff()
-    references = get_reference_websites()
-    return str(result), references
+    return result
 
 # Gradio interface
 with gr.Blocks() as demo:
-    gr.Markdown("# AI Trends Q&A with Top Reference Websites")
+    gr.Markdown("# AI Trends Q&A")
     with gr.Row():
-        with gr.Column(scale=3):
-            query_input = gr.Textbox(label="Ask about AI trends", placeholder="Type your question...")
-            suggestion_output = gr.Textbox(label="Prompt Suggestions", interactive=False)
-            submit_button = gr.Button("Submit")
-        with gr.Column(scale=1):
-            reference_output = gr.Markdown(label="Top Reference Websites")
+        query_input = gr.Textbox(label="Ask about AI trends", placeholder="Type your question...")
+        suggestion_output = gr.Textbox(label="Prompt Suggestions", interactive=False)
     
     query_input.change(
         fn=suggest_prompts,
@@ -124,12 +112,13 @@ with gr.Blocks() as demo:
         outputs=suggestion_output
     )
     
+    submit_button = gr.Button("Submit")
     output = gr.Textbox(label="Response")
     
     submit_button.click(
         fn=process_query,
         inputs=query_input,
-        outputs=[output, reference_output]
+        outputs=output
     )
 
 # Launch interface
